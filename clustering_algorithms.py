@@ -20,26 +20,21 @@ class CustomKMeans:
 
     def fit(self, X: np.ndarray, y=None):
         X = check_array(X, accept_sparse='csr')
-
-        # Initialize centroids randomly
         np.random.seed(self.random_state)
+        # suppose random cluster centers based on the number of k
         self.cluster_centers_ = X[np.random.choice(X.shape[0], self.n_clusters, replace=False)]
 
         for _ in range(self.max_iter):
-            # Calculate distances from each point to centroids
+            # calculate the distance of every point to each cluster center
             distances = np.sqrt(((X - self.cluster_centers_[:, np.newaxis]) ** 2).sum(axis=2))
-            # distances = np.sqrt(np.sum((self.cluster_centers_ - X)** 2, axis=0))
-
-            # Assign labels based on the closest centroid
+            # after calculation assign each point to the nearest cluster center
             self.labels_ = np.argmin(distances, axis=0)
-
-            # Update centroids based on the mean of points in each cluster
+            # reposition cluster centers based on the mean position of each cluster
             new_centers = np.array([X[self.labels_ == i].mean(axis=0) for i in range(self.n_clusters)])
-
-            # Check for convergence
+            # if no significant change break the code
             if np.allclose(self.cluster_centers_, new_centers):
                 break
-
+            # update existing cluster centers with new centers
             self.cluster_centers_ = new_centers
 
         return self
@@ -57,42 +52,50 @@ class CustomDBSCAN:
 
     def fit(self, X):
         X = X.astype(np.float32)
+        # Get the number of samples in the dataset
         n_samples = X.shape[0]
-        self.labels_ = np.full(n_samples, -1)  # Assign -1 as noise points
+        # Initialize labels_ with 0, marking all points as unclassified initially
+        self.labels_ = np.full(n_samples, 0)
         cluster_label = 0
 
         for i in range(n_samples):
-            if self.labels_[i] != -1:
+            # Check if the point has already been labeled, if yes, continue to the next point
+            if self.labels_[i] != 0:
                 continue
-
-            neighbors = self._find_neighbors(X, i)
+            # Find neighboring points within a specific radius (eps) around the current point
+            neighbors = self._find_neighbors_within_radius(X, i)
+            # Check if the length is less than the given minPts, then mark it as noise
             if len(neighbors) < self.min_samples:
                 self.labels_[i] = -1  # Mark as noise
             else:
+                # Assign a new cluster label and expand the cluster
                 cluster_label += 1
                 self.labels_[i] = cluster_label
                 self._expand_cluster(X, i, neighbors, cluster_label)
 
         return self
 
-    def _find_neighbors(self, X, point_idx):
+    def _find_neighbors_within_radius(self, X, point_idx):
+        # Calculate distances between the current point and all other points within the given radius(eps)
         distances = np.linalg.norm(X - X[point_idx], axis=1)
         return np.where(distances <= self.eps)[0]
 
     def _expand_cluster(self, X, point_idx, neighbors, cluster_label):
-        queue = list(neighbors)
+        seeds = list(neighbors)
 
-        while queue:
-            current_object_idx = queue.pop(0)
-            if self.labels_[current_object_idx] == -1:
-                self.labels_[current_object_idx] = cluster_label
-
-            current_neighbors = self._find_neighbors(X, current_object_idx)
+        while seeds:
+            current_object = seeds.pop(0)
+            # If the neighbor is not assigned to any cluster, assign it to the current cluster
+            if self.labels_[current_object] == 0:
+                self.labels_[current_object] = cluster_label
+            # Find neighbors of the current neighbor
+            current_neighbors = self._find_neighbors_within_radius(X, current_object)
+            # If the number of neighbors is sufficient, add them to the cluster
             if len(current_neighbors) >= self.min_samples:
-                for neighbor_idx in current_neighbors:
-                    if self.labels_[neighbor_idx] in [-1, 0]:
-                        queue.append(neighbor_idx)
-                        self.labels_[neighbor_idx] = cluster_label
+                for neighbor_index in current_neighbors:
+                    if self.labels_[neighbor_index] in [-1, 0]:
+                        seeds.append(neighbor_index)
+                        self.labels_[neighbor_index] = cluster_label
 
     def fit_predict(self, X):
         self.fit(X)
